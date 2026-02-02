@@ -5,9 +5,9 @@ Zod-based typed [ky](https://github.com/sindresorhus/ky): a drop-in ky instance 
 ## Install
 
 ```bash
-pnpm add zod-ky ky zod
+pnpm add zod-ky zod
 # or
-npm install zod-ky ky zod
+npm install zod-ky zod
 ```
 
 **Peer dependencies:** `zod` >=4.3.6
