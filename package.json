@@ -1,6 +1,6 @@
 {
   "name": "zod-ky",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Zod Ky - Zod based typed fetch",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -19,7 +19,15 @@
     "test": "jest",
     "prepublishOnly": "pnpm run build"
   },
-  "author": "Coteries SA",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/acominotto/zod-ky"
+  },
+  "author": {
+    "name": "Adrien Cominotto",
+    "email": "adrien.cominotto@gmail.com",
+    "url": "https://github.com/acominotto"
+  },
   "license": "ISC",
   "peerDependencies": {
     "zod": ">=4.3.6"
@@ -37,5 +45,31 @@
     "jest": "^29.7.0",
     "ts-jest": "^29.2.5",
     "typescript": "^5.7.2"
-  }
+  },
+  "keywords": [
+    "fetch",
+    "request",
+    "requests",
+    "http",
+    "https",
+    "fetching",
+    "get",
+    "url",
+    "curl",
+    "wget",
+    "net",
+    "network",
+    "ajax",
+    "api",
+    "rest",
+    "xhr",
+    "browser",
+    "got",
+    "axios",
+    "node-fetch",
+    "zod",
+    "ky",
+    "schema",
+    "validation"
+  ]
 }
