@@ -47,7 +47,7 @@ import { z } from "zod";
 const api = ky.extend({ prefixUrl: "https://api.example.com" });
 const schema = z.object({ title: z.string() });
 
-const data = await api.get("/post/1").then((res) => res.parseJson(schema));
+const data = await api.get("/post/1").parseJson(schema);
 ```
 
 ## API
