@@ -22,15 +22,13 @@ const UserSchema = z.object({ id: z.number(), name: z.string() });
 type User = z.infer<typeof UserSchema>;
 
 // parseJson: validates and returns typed data, throws ZodError on failure
-const user = await ky
-  .get("https://api.example.com/user")
-  .
+const user = await ky.get("https://api.example.com/user").parseJson(UserSchema);
 // user: User
 
 // safeParseJson: returns { success: true, data } or { success: false, error }
 const result = await ky
   .get("https://api.example.com/user")
-  .then((res) => res.safeParseJson(UserSchema));
+  .safeParseJson(UserSchema);
 if (result.success) {
   console.log(result.data);
 } else {
