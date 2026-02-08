@@ -11,7 +11,7 @@ export type AugmentedResponsePromise<T = unknown> = ky.ResponsePromise<T> & Augm
 
 export type AugmentedKyInstance = Omit<
   ky.KyInstance,
-  "extend" | "get" | "post" | "put" | "delete" | "patch" | "head" | "options"
+  "extend" | "get" | "post" | "put" | "delete" | "patch" | "head" | "options" | "create"
 > & {
   get: <T = unknown>(url: string | URL, options?: ky.Options) => AugmentedResponsePromise<T>
   post: <T = unknown>(url: string | URL, options?: ky.Options) => AugmentedResponsePromise<T>
@@ -23,4 +23,5 @@ export type AugmentedKyInstance = Omit<
   extend: (
     defaultOptions?: ky.Options | ((parentOptions: ky.Options) => ky.Options)
   ) => AugmentedKyInstance
+  create: (options: ky.Options) => AugmentedKyInstance
 }

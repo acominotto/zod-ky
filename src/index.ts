@@ -1,3 +1,4 @@
+import { ky } from './zod-ky'
 export {
     ForceRetryError, HTTPError, isForceRetryError,
     isHTTPError,
@@ -10,5 +11,7 @@ export {
 } from 'ky'
 export * from './zod-ky'
 export type { AugmentedKyInstance, AugmentedResponse, AugmentedResponsePromise } from './zod-ky.types'
+
+export default ky
 
 
