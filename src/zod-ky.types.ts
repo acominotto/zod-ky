@@ -9,19 +9,18 @@ export type AugmentedResponse<T = unknown> = ky.KyResponse<T> & {
 
 export type AugmentedResponsePromise<T = unknown> = ky.ResponsePromise<T> & AugmentedResponse<T>
 
-export type AugmentedKyInstance = Omit<
-  ky.KyInstance,
-  "extend" | "get" | "post" | "put" | "delete" | "patch" | "head" | "options" | "create"
-> & {
-  get: <T = unknown>(url: string | URL, options?: ky.Options) => AugmentedResponsePromise<T>
-  post: <T = unknown>(url: string | URL, options?: ky.Options) => AugmentedResponsePromise<T>
-  put: <T = unknown>(url: string | URL, options?: ky.Options) => AugmentedResponsePromise<T>
-  delete: <T = unknown>(url: string | URL, options?: ky.Options) => AugmentedResponsePromise<T>
-  patch: <T = unknown>(url: string | URL, options?: ky.Options) => AugmentedResponsePromise<T>
-  head: <T = unknown>(url: string | URL, options?: ky.Options) => AugmentedResponsePromise<T>
-  options: <T = unknown>(url: string | URL, options?: ky.Options) => AugmentedResponsePromise<T>
+export type AugmentedKyInstance = {
+  <T = unknown>(input: ky.Input, options?: ky.Options): AugmentedResponsePromise<T>
+} & {
+  get: <T = unknown>(url: ky.Input, options?: ky.Options) => AugmentedResponsePromise<T>
+  post: <T = unknown>(url: ky.Input, options?: ky.Options) => AugmentedResponsePromise<T>
+  put: <T = unknown>(url: ky.Input, options?: ky.Options) => AugmentedResponsePromise<T>
+  delete: <T = unknown>(url: ky.Input, options?: ky.Options) => AugmentedResponsePromise<T>
+  patch: <T = unknown>(url: ky.Input, options?: ky.Options) => AugmentedResponsePromise<T>
+  head: (url: ky.Input, options?: ky.Options) => AugmentedResponsePromise
+  options: <T = unknown>(url: ky.Input, options?: ky.Options) => AugmentedResponsePromise<T>
   extend: (
     defaultOptions?: ky.Options | ((parentOptions: ky.Options) => ky.Options)
   ) => AugmentedKyInstance
   create: (options: ky.Options) => AugmentedKyInstance
-}
+} & Pick<ky.KyInstance, "stop" | "retry">

@@ -4,12 +4,20 @@ import { ZodError, z } from 'zod'
  * Mock for ky that replicates real ky's behavior:
  * - extend() deep-merges hooks by concatenating arrays
  * - afterResponse hooks all run in order on the response
+ * - optional retry + beforeRetry (401 + listed methods): re-fetch after hooks mutate `request.headers`
  * - HTTP methods return a ResponsePromise (promise with .json(), .text() shortcuts)
  */
 jest.mock('ky', () => {
+  type BeforeRetryPayload = {
+    request: Request
+    options: Record<string, unknown>
+    error: Error & { response: Response }
+    retryCount: number
+  }
+
   type HooksMap = {
     beforeRequest?: Array<(req: Request, opts: Record<string, unknown>) => void>
-    beforeRetry?: Array<(state: Record<string, unknown>) => void>
+    beforeRetry?: Array<(state: BeforeRetryPayload) => void | Promise<void>>
     afterResponse?: Array<(req: Request, opts: Record<string, unknown>, res: Response) => Response | Promise<Response>>
     beforeError?: Array<(error: Error) => Error>
   }
@@ -59,24 +67,89 @@ jest.mock('ky', () => {
 
     const runRequest = (method: string, url: string, options?: Record<string, unknown>) => {
       const resolvedUrl = baseUrl(url)
-      const responsePromise = (async () => {
-        let response = await fetch(resolvedUrl, { method, ...options })
+      const retryOpt = mergedOptions.retry as
+        | {
+            limit?: number
+            statusCodes?: number[]
+            methods?: string[]
+            delay?: () => number
+          }
+        | undefined
 
-        // Run all afterResponse hooks in order (like real ky)
-        if (hooks.afterResponse) {
-          for (const hook of hooks.afterResponse) {
-            const result = await hook(new Request(resolvedUrl), {}, response)
-            if (result) response = result
+      const responsePromise = (async () => {
+        const retryLimit = retryOpt?.limit ?? 0
+        const retryStatusCodes = retryOpt?.statusCodes ?? []
+        const retryMethods = (retryOpt?.methods ?? []).map((m: string) => m.toUpperCase())
+        const methodUpper = method.toUpperCase()
+
+        let failures = 0
+        let currentHeaders = new Headers((options?.headers as HeadersInit | undefined) ?? undefined)
+
+        while (true) {
+          let response = await fetch(resolvedUrl, {
+            ...options,
+            method,
+            headers: currentHeaders,
+          })
+
+          if (hooks.afterResponse) {
+            for (const hook of hooks.afterResponse) {
+              const result = await hook(new Request(resolvedUrl), {}, response)
+              if (result) response = result
+            }
+          }
+
+          if (response.ok) return response
+
+          const mayRetry =
+            retryLimit > 0 &&
+            failures < retryLimit &&
+            retryStatusCodes.includes(response.status) &&
+            (retryMethods.length === 0 || retryMethods.includes(methodUpper))
+
+          if (!mayRetry || !hooks.beforeRetry?.length) return response
+
+          failures++
+          const error = Object.assign(new Error(`HTTP ${response.status}`), {
+            response,
+          }) as Error & { response: Response }
+
+          const kyRequest = new Request(resolvedUrl, {
+            method,
+            headers: currentHeaders,
+          })
+
+          for (const hook of hooks.beforeRetry) {
+            await hook({
+              request: kyRequest,
+              options: mergedOptions,
+              error,
+              retryCount: failures,
+            })
+          }
+
+          currentHeaders = new Headers(kyRequest.headers)
+          const delayFn = retryOpt?.delay
+          if (delayFn) {
+            await new Promise((resolve) => setTimeout(resolve, delayFn()))
           }
         }
-
-        return response
       })()
 
       return toResponsePromise(responsePromise)
     }
 
-    const instance = {
+    /** Callable `(input, options?)` like real ky so zod-ky can wrap the default invoke form. */
+    function dispatch(input: string | URL | Request, options?: Record<string, unknown>) {
+      if (input instanceof Request) {
+        return runRequest(input.method.toUpperCase(), input.url, options)
+      }
+      const url = typeof input === 'string' ? input : input.href
+      const method = String((options?.method as string | undefined) ?? 'GET').toUpperCase()
+      return runRequest(method, url, options)
+    }
+
+    return Object.assign(dispatch, {
       extend(options: Record<string, unknown> | ((parent: Record<string, unknown>) => Record<string, unknown>)) {
         const opts = typeof options === 'function' ? options(mergedOptions) : options
         const parentHooks = (mergedOptions.hooks ?? {}) as HooksMap
@@ -99,8 +172,7 @@ jest.mock('ky', () => {
       patch: (url: string, options?: Record<string, unknown>) => runRequest('PATCH', url, options),
       head: (url: string, options?: Record<string, unknown>) => runRequest('HEAD', url, options),
       options: (url: string, options?: Record<string, unknown>) => runRequest('OPTIONS', url, options),
-    }
-    return instance
+    })
   }
   return { __esModule: true, default: createMockKy({}) }
 })
@@ -324,6 +396,28 @@ describe('zodKy', () => {
     })
   })
 
+  describe('callable zodKy(input)', () => {
+    it('accepts a Request and returns an augmented response promise', async () => {
+      mockFetch(fetchMock, validUser)
+
+      const req = new Request('https://api.example.com/user', { method: 'GET' })
+      const data = await ky(req).parseJson(userSchema)
+      expect(data).toEqual(validUser)
+    })
+
+    it('works on an extended instance (prefixUrl)', async () => {
+      const extended = ky.extend({ prefixUrl: 'https://api.example.com' })
+      mockFetch(fetchMock, validUser)
+
+      const data = await extended('/user').parseJson(userSchema)
+      expect(data).toEqual(validUser)
+      expect(fetchMock).toHaveBeenCalledWith(
+        'https://api.example.com/user',
+        expect.any(Object)
+      )
+    })
+  })
+
   describe('HTTP methods return AugmentedResponsePromise', () => {
     it('get returns response with parseJson and safeParseJson', async () => {
       mockFetch(fetchMock, validUser)
@@ -481,6 +575,91 @@ describe('zodKy', () => {
 
       const data = await promise.json()
       expect(data).toEqual(validUser)
+    })
+  })
+
+  describe('retry policy (token refresh via beforeRetry)', () => {
+    const tokenSchema = z.object({ access_token: z.string() })
+    const resourceSchema = z.object({ id: z.number(), name: z.string() })
+
+    it('beforeRetry can await zodKy (parseJson) to refresh a token and retry with Authorization', async () => {
+      let resourceFetches = 0
+      let refreshFetches = 0
+
+      fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+        const url =
+          typeof input === 'string'
+            ? input
+            : input instanceof URL
+              ? input.href
+              : input.url
+
+        const authFromRequest =
+          typeof input !== 'string' && !(input instanceof URL)
+            ? input.headers.get('Authorization')
+            : null
+        const authFromInit = init?.headers
+          ? new Headers(init.headers as HeadersInit).get('Authorization')
+          : null
+        const authorization = authFromRequest ?? authFromInit
+
+        if (url.includes('/refresh')) {
+          refreshFetches++
+          return Promise.resolve(
+            new Response(JSON.stringify({ access_token: 'fresh-token' }), {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            })
+          )
+        }
+
+        if (url.includes('/resource')) {
+          resourceFetches++
+          const auth = authorization
+          if (auth !== 'Bearer fresh-token') {
+            return Promise.resolve(new Response('Unauthorized', { status: 401 }))
+          }
+          return Promise.resolve(
+            new Response(JSON.stringify({ id: 1, name: 'after-refresh' }), {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            })
+          )
+        }
+
+        return Promise.reject(new Error(`unexpected fetch url: ${url}`))
+      })
+
+      const client = ky.extend({
+        retry: {
+          limit: 2,
+          methods: ['get'],
+          statusCodes: [401],
+          delay: () => 0,
+        },
+        hooks: {
+          beforeRetry: [
+            async ({ request, error }) => {
+              const err = error as Error & { response?: Response }
+              if (!err.response || err.response.status !== 401) {
+                return
+              }
+              const { access_token } = await ky
+                .post('https://auth.example.com/refresh', {
+                  json: { grant_type: 'refresh_token' },
+                })
+                .parseJson(tokenSchema)
+              request.headers.set('Authorization', `Bearer ${access_token}`)
+            },
+          ],
+        },
+      })
+
+      const data = await client.get('https://api.example.com/resource').parseJson(resourceSchema)
+
+      expect(data).toEqual({ id: 1, name: 'after-refresh' })
+      expect(refreshFetches).toBe(1)
+      expect(resourceFetches).toBe(2)
     })
   })
 })

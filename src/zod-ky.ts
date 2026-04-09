@@ -1,4 +1,4 @@
-import { type KyInstance, type Options, type ResponsePromise } from "ky";
+import { type Input, type KyInstance, type Options, type ResponsePromise } from "ky";
 import { ZodType } from "zod";
 
 import libKy from "ky";
@@ -49,28 +49,29 @@ function augmentPromise<T>(promise: ResponsePromise<T>): AugmentedResponsePromis
   return chained
 }
 
-const enhanceKy = (ky: KyInstance): AugmentedKyInstance => {
-  const enhanced = {} as Record<string, unknown>
+const enhanceKy = (instance: KyInstance): AugmentedKyInstance => {
+  const call = <T = unknown>(input: Input, options?: Options) =>
+    augmentPromise(instance<T>(input, options))
 
-  // Wrap each HTTP method to return an AugmentedResponsePromise
+  const extra = {} as Record<string, unknown>
+
   for (const method of HTTP_METHODS) {
-    enhanced[method] = (url: string | URL, options?: Options) =>
-      augmentPromise((ky as any)[method](url, options))
+    extra[method] = (url: Input, options?: Options) =>
+      augmentPromise((instance as any)[method](url, options))
   }
 
-  enhanced.extend = (defaultOptions: Options | ((parentOptions: Options) => Options)) =>
-    enhanceKy(ky.extend(defaultOptions))
-  enhanced.create = (options: Options) =>
+  extra.extend = (defaultOptions: Options | ((parentOptions: Options) => Options)) =>
+    enhanceKy(instance.extend(defaultOptions))
+  extra.create = (options: Options) =>
     enhanceKy(libKy.create(options))
 
-  // Copy over non-method properties (stop, retry, etc.)
-  for (const key of Object.keys(ky)) {
-    if (!(key in enhanced)) {
-      enhanced[key] = (ky as unknown as Record<string, unknown>)[key]
+  for (const key of Object.keys(instance)) {
+    if (!(key in extra)) {
+      extra[key] = (instance as unknown as Record<string, unknown>)[key]
     }
   }
 
-  return enhanced as unknown as AugmentedKyInstance
+  return Object.assign(call, extra) as unknown as AugmentedKyInstance
 }
 
 export const ky = enhanceKy(libKy)
